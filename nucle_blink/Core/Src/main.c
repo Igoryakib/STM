@@ -43,7 +43,7 @@
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-volatile bool isClickedBtn = false;
+static volatile bool isClickedBtn = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
