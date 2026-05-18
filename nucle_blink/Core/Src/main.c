@@ -250,9 +250,9 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	static uint32_t currentClick = 0;
+	static const uint32_t currentClick = HAL_GetTick();
 	static uint32_t prevClick = 0;
-	currentClick = HAL_GetTick();
+
 	if (GPIO_PIN_1 == GPIO_Pin && currentClick - prevClick > TIMESTAMP) {
 		isClickedBtn = true;
 		prevClick = currentClick;
