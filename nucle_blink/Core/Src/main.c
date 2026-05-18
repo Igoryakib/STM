@@ -31,7 +31,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define TIMESTAMP 30
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -97,7 +97,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if (true == isClickedBtn) {
+	  if (isClickedBtn) {
 		  isClickedBtn = false;
 		  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 
@@ -226,7 +226,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PA1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD2_Pin PA10 */
@@ -249,11 +249,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-uint32_t currentClick = 0;
-uint32_t prevClick = 0;
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	static uint32_t currentClick = 0;
+	static uint32_t prevClick = 0;
 	currentClick = HAL_GetTick();
-	if (GPIO_PIN_1 == GPIO_Pin && currentClick - prevClick > 30) {
+	if (GPIO_PIN_1 == GPIO_Pin && currentClick - prevClick > TIMESTAMP) {
 		isClickedBtn = true;
 		prevClick = currentClick;
 	}
