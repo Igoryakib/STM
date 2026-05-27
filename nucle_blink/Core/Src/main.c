@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,14 +45,22 @@
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart1_tx;
+DMA_HandleTypeDef hdma_usart3_rx;
+DMA_HandleTypeDef hdma_usart3_tx;
 
 /* USER CODE BEGIN PV */
 static volatile bool isClickedBtn = false;
+static volatile bool rx_done = false;
+static volatile uint32_t Error = false;
+bool Rx_done_copy = false;
+uint32_t Error_copy = HAL_UART_ERROR_NONE;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
@@ -60,7 +70,62 @@ static void MX_USART3_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void tx_callback(UART_HandleTypeDef *huart) {
+	if (&huart1 == huart) {
+		 HAL_GPIO_WritePin(Debug_pin_GPIO_Port, Debug_pin_Pin, GPIO_PIN_RESET);
+	}
+}
 
+static void rx_callback(UART_HandleTypeDef *huart) {
+	if (&huart3 == huart) {
+		rx_done = true;
+		 HAL_GPIO_WritePin(Debug_rx_GPIO_Port, Debug_rx_Pin, GPIO_PIN_RESET);
+	}
+}
+
+static void error_callback(UART_HandleTypeDef *huart) {
+	if (&huart3 == huart) {
+		Error = huart->ErrorCode;
+		 HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	}
+}
+
+static const char*  errors_desc[] =
+{
+		 "Parity error",
+		 "Noise error",
+		 "Frame error",
+		 "Overrun error",
+		 "DMA transfer error",
+		 "Invalid Callback error"
+};
+
+static char* error2txt(const uint32_t _error, char* const _buf, size_t _size)
+{
+	const size_t total_errors = sizeof(errors_desc) / sizeof(errors_desc[0]);
+	uint32_t error = _error & ((1ul << total_errors) - 1);
+	_buf[0]='\0';
+	if (error == HAL_UART_ERROR_NONE)
+	{
+		snprintf(_buf,_size,"No error");
+	}
+	else
+	{
+		uint8_t bit_no = 0;
+		int32_t space_left = _size;
+		while (error != HAL_UART_ERROR_NONE && bit_no < total_errors && space_left > 0)
+		{
+			if ((error & (1ul << bit_no)) != 0)
+			{
+				snprintf(_buf + strlen(_buf), space_left,"%s ", errors_desc[bit_no]);
+				error &= ~(1ul << bit_no);
+				space_left = _size - strlen(_buf);
+			}
+			bit_no++;
+		}
+	}
+	return _buf;
+}
 /* USER CODE END 0 */
 
 /**
@@ -92,28 +157,43 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_UART_RegisterCallback(&huart1, HAL_UART_TX_COMPLETE_CB_ID, tx_callback);
+  HAL_UART_RegisterCallback(&huart3, HAL_UART_RX_COMPLETE_CB_ID, rx_callback);
+  HAL_UART_RegisterCallback(&huart3, HAL_UART_ERROR_CB_ID, error_callback);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  if (isClickedBtn) {
-//		  isClickedBtn = false;
-//		  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-//	  }
-	  uint8_t data[6] = {0};
-	  HAL_UART_Transmit(&huart1, (uint8_t*)"Hello\n", 6, HAL_MAX_DELAY);
-	  while (HAL_UART_Receive(&huart3, data, 6, 1000) == HAL_OK ) {
-	  }
-	  HAL_UART_Transmit(&huart3, data, 6, HAL_MAX_DELAY);
-	  HAL_Delay(100);
+	  rx_done = false;
+	  Error = HAL_UART_ERROR_NONE;
+	  uint8_t const data[] = "\x1""Hello world\n";
+	  uint8_t const len = strlen((char*)data);
+	  static uint8_t rx_data[12] = {0};
+	  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(Debug_pin_GPIO_Port, Debug_pin_Pin, GPIO_PIN_SET);
+	  HAL_UART_Transmit_DMA(&huart1, data, len);
+	  HAL_GPIO_WritePin(Debug_rx_GPIO_Port, Debug_rx_Pin, GPIO_PIN_SET);
+	  HAL_UART_Receive_IT(&huart3, rx_data, sizeof(rx_data));
+	  do
+		{
+			Rx_done_copy = rx_done;
+			Error_copy = Error;
+		} while (!Rx_done_copy && Error_copy == HAL_UART_ERROR_NONE);
+		asm("nop");
+		if (Error_copy != HAL_UART_ERROR_NONE) {
+			  static char buf[100];
+			error2txt(Error_copy, buf, sizeof(buf));
+			HAL_UART_Transmit_IT(&huart3, (uint8_t *)buf, strlen(buf));
+		}
 
+	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -275,6 +355,29 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+  /* DMA2_Stream7_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream7_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -293,7 +396,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LD2_Pin|GPIO_PIN_10, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LD2_Pin|Debug_rx_Pin|Debug_pin_Pin|GPIO_PIN_10, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
@@ -307,8 +410,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD2_Pin PA10 */
-  GPIO_InitStruct.Pin = LD2_Pin|GPIO_PIN_10;
+  /*Configure GPIO pins : LD2_Pin Debug_rx_Pin Debug_pin_Pin PA10 */
+  GPIO_InitStruct.Pin = LD2_Pin|Debug_rx_Pin|Debug_pin_Pin|GPIO_PIN_10;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
