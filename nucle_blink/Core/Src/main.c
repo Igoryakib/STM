@@ -136,7 +136,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -145,7 +144,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+//  static uint8_t counter = 0;
+//  volatile uint8_t stackCounter = 0;
   /* USER CODE END Init */
 
   /* Configure the system clock */
